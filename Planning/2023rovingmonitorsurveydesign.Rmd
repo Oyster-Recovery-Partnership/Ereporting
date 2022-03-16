@@ -1,0 +1,261 @@
+---
+title: "2023 Roving Monitor Survey Design Guidance"
+author: "Kaycee Coleman"
+date: '2022-03-16'
+output: pdf_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This document utilizes our past efforts to guide 2023 monitoring efforts for all fisheries. If you need to edit or update this report and are unsure on how to use markdown syntax, please see a cheat sheet [here](https://www.rstudio.com/wp-content/uploads/2015/02/rmarkdown-cheatsheet.pdf).
+
+```{r, include=FALSE}
+#-----------#
+# load packages
+#-----------#
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(lubridate)
+library(readxl)
+library(hms)
+#-----------#
+
+#-----------#
+# load data
+#-----------#
+dir.in = "Library/CloudStorage/OneDrive-SharedLibraries-OysterRecoveryPartnership,Inc/ORP - Operations/Sustainable Fisheries/E-Reporting/Data/FACTSdata/rawdata/" # if not synced and have to download all of the data, change dir. here
+
+# WATERMEN REPORTS
+#charter data from 2021
+FH = read_csv(paste(dir.in, "CharterTrips_021522.csv", sep=""))
+FH$type = "charter"
+# shellfish data from 2021-2022
+SF21 = read_csv(paste(dir.in, "ShellfishTrips2021only_031622.csv", sep=""))
+SF22 = read_csv(paste(dir.in, "ShellfishTrips2022only_031622.csv", sep=""))
+SF = rbind(SF21, SF22)
+SF$type = "shellfish"
+# finfish data from 2019
+FF_BC = read_excel(paste(dir.in, "Aug2019_RM_WM.xlsx", sep=""), sheet = 2)
+FF_BC$type = FF_BC$Fishery
+
+# ROVING MONITOR REPORTS
+# RM charter data from 2021
+RM_FH = read_csv(paste(dir.in, "CharterMonitorReports_021522.csv", sep=""))
+RM_FH$type = "charter"
+# RM shellfish data from 2021-2022
+RM_SF21 = read_csv(paste(dir.in, "ShellfishMonitorReports2021only_031622.csv", sep=""))
+RM_SF22 = read_csv(paste(dir.in, "ShellfishMonitorReports2022only_031622.csv", sep=""))
+RM_SF = rbind(RM_SF21, RM_SF22)
+RM_SF$type = "shellfish"
+# RM finfish + blue crab data from 2019
+RM_FF_BC = read_excel(paste(dir.in, "Aug2019_RM_WM.xlsx", sep=""), sheet = 1)
+RM_FF_BC = left_join(RM_FF_BC, dplyr::select(FF_BC, type, Date, 'Trip ID'), by="Trip ID")
+
+rm(RM_SF21,RM_SF22,SF21,SF22)
+#-----------#
+
+#-----------#
+# format data
+#-----------#
+# fix names
+names(FH) = gsub(" ","",names(FH))
+names(FF_BC) = gsub(" ","",names(FF_BC))
+names(SF) = gsub(" ","",names(SF))
+names(FH) = gsub("#","",names(FH))
+names(FF_BC) = gsub("#","",names(FF_BC))
+names(SF) = gsub("#","",names(SF))
+names(RM_FH) = gsub(" ","",names(RM_FH))
+names(RM_FF_BC) = gsub(" ","",names(RM_FF_BC))
+names(RM_SF) = gsub(" ","",names(RM_SF))
+names(RM_FH) = gsub("#","",names(RM_FH))
+names(RM_FF_BC) = gsub("#","",names(RM_FF_BC))
+names(RM_SF) = gsub("#","",names(RM_SF))
+
+# select only what is needed to speed up the join
+SF = dplyr::select(SF, TripID, type, Date, SH, EH, EHLandingTime, EHZIP,Gear) %>%
+  rename(EHZip = EHZIP)
+FH = dplyr::select(FH, TripID, type, Date, SH, EH, EHLandingTime, EHZip,Gear)
+FF_BC = dplyr::select(FF_BC, TripID, type, Date, SH, EH, EHLandingTime, EHZip,Gear) %>% 
+  mutate(EHLandingTime = as_hms(sapply(strsplit(as.character(EHLandingTime)," "), tail,1))) 
+
+RM_SF = dplyr::select(RM_SF, TripID, type, Date, MonitorReport,TimeChecked)
+RM_FH = dplyr::select(RM_SF, TripID, type, Date, MonitorReport,TimeChecked)
+RM_FF_BC = dplyr::select(RM_FF_BC, TripID, type, Date, MonitorReport, Time) %>%
+  mutate(Time = as_hms(sapply(strsplit(as.character(Time)," "), tail,1))) %>% 
+  rename(TimeChecked = Time) 
+
+# makes sure classes match
+FH$Date = as.POSIXct(FH$Date,  format = "%d/%m/%Y")
+SF$Date = as.POSIXct(SF$Date,  format = "%d/%m/%Y")
+FF_BC$Date = as.POSIXct(as.character(FF_BC$Date),  format = "%Y-%m-%d") #is UTC, needs to be EST to combine
+RM_FF_BC$Date = as.character(format(RM_FF_BC$Date, format = "%d/%m/%Y")) # reformat
+
+# combine all trip reports (year is not relevant for this effort estimation)
+# & combine all RM reports
+trips = bind_rows(FH, SF, FF_BC) 
+RM = bind_rows(RM_FH, RM_FF_BC, RM_SF)
+RM$Date = as.POSIXct(RM$Date,  format = "%d/%m/%Y")
+
+# filter to only the last trip in the data (most up to date report)
+trips = group_by(trips, TripID) %>%
+  mutate(lastH = ifelse(EH %in% max(EH), "yes","no")) %>%
+  filter(lastH %in% "yes") %>% ungroup() %>% 
+  dplyr::select(-EH, -lastH) 
+
+RM = group_by(RM, TripID) %>%
+  mutate(lastR = ifelse(MonitorReport == max(MonitorReport),"yes","no")) %>%
+  filter(lastR %in% "yes") %>%
+  dplyr::select(-lastR, -MonitorReport) %>%
+  distinct() %>% ungroup()  
+  
+# add month, day of the week, and hour columns
+trips = trips %>% 
+  mutate(mo = month(Date),
+         yr = year(Date),
+         d = wday(Date, label = TRUE, abbr = TRUE),
+         hr = hour(EHLandingTime))
+RM = RM %>% 
+  mutate(mo = month(Date),
+         yr = year(Date),
+         d = wday(Date, label = TRUE, abbr = TRUE),
+         hr = hour(TimeChecked))
+
+# summarize trips by month
+trips = filter(trips, !TripID %in% 1191070) #remove test trip
+trip_sum_byMonth = trips %>% 
+  distinct() %>% 
+  group_by(mo, yr, type) %>% 
+  dplyr::summarise(n=n(), .groups = 'drop') %>%
+  mutate(month = mo, 
+         month = replace(month, month %in% 1, "Jan."),
+         month = replace(month, month %in% 2, "Feb."),
+         month = replace(month, month %in% 3, "Mar."),
+         month = replace(month, month %in% 4, "Apr."),
+         month = replace(month, month %in% 5, "May."),
+         month = replace(month, month %in% 6, "Jun."),
+         month = replace(month, month %in% 7, "Jul."),
+         month = replace(month, month %in% 8, "Aug."),
+         month = replace(month, month %in% 9, "Sep."),
+         month = replace(month, month %in% 10, "Oct."),
+         month = replace(month, month %in% 11, "Nov."),
+         month = replace(month, month %in% 12, "Dec."))
+
+# summarize trips by day of the week
+trip_sum_byDay = trips %>% 
+  distinct() %>% 
+  group_by(type, d) %>% 
+  dplyr::summarise(n=n(), .groups = 'drop')
+
+# summarize trips by landing time
+trip_sum_byHour = trips %>% 
+  distinct() %>% 
+  group_by(type, hr) %>% 
+  dplyr::summarise(n=n(), .groups = 'drop')
+
+# summarize RM spot check time
+RM_sum_byHour = RM %>% 
+  distinct() %>% 
+  group_by(type, hr) %>% 
+  dplyr::summarise(n=n(), .groups = 'drop')
+
+# summarize by zipcode
+
+#-----------#
+```
+## Which months should a Roving Monitor be monitoring each fishery
+If granted the NOAA FIS RFP, funding would start in spring 2023 and would encompass 12 months. Here is an outline of when the fishery opens/closes. A visual of this can be seen in confluence [here](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1819213825/Fisheries+Dates).    
+- Shellfish:  
+-- Oysters are open 10/1 - 3/31 except weekends. Different gears have different opening dates, e.g. dredge opens 11/1.  
+-- Soft Shell Clams are open year round except Sunday
+-- Razor Clams  
+-- Hard Shell Clams are open 9/15-5/31 except Sunday but are unlikely. Fishery is functionally extinct in bay.  
+- Charter: see full species opening dates in list in link above  
+-- Striped Bass
+- Finfish: see full species open dates in list in link above
+-- Yellow Perch
+-- Striped Bass
+- Blue Crab  
+-- Dates differ for hard, soft, and peelers but generally encompassed in 4/1 - 12/15
+
+```{r}
+# plot for month summary
+ggplot() + 
+  geom_bar(data = trip_sum_byMonth, aes(reorder(month, mo), n, fill = type), 
+           stat = "identity" , position = "stack") + 
+  labs(x = "Month", y = "Number of Trips", fill = "Fishery") + 
+  theme_bw() +
+  theme(text = element_text(size = 20)) 
+```
+
+```{r}
+# plot for day summary
+ggplot() + 
+  geom_bar(data = trip_sum_byDay, aes(x=d, y=n, fill = type), 
+           stat = "identity" , position = "stack") + 
+  labs(x = "Day of the Week", y = "Number of Trips", fill = "Fishery") + 
+  theme_bw() +
+  theme(text = element_text(size = 20)) 
+```
+
+## How to decide on time blocks  
+Here is the time block divisions that we have used so far:  
+- For finfish and bluecrab we had  
+-- 
+- For shellfish, roving monitors work eight days a month in six hour time blocks. Keep in mind that under the current managment, there is no fishing on weekends. Here is the landing time guidance in the permit: Oysters by 2:30 p.m. when using shaft tong, patent tong, dredge boat, diving apparatus, or power
+dredge; Oysters at least 1/2 hour before sunset when using a dredge boat propelled by means of an auxiliary
+yawl boat; and Clams at least 1/2 hour before sunset.  See an example schedule used for March 2022  [here](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1832714241/March+2022).  
+-- 8 am - 2 pm  
+-- 9 am - 3 pm   
+-- 12 pm - 6 pm  
+-- Carrie has requested that some time in the future we also have roving monitors at dealers, this may or may not be included in this effort but keep it in mind.   
+- For charter, roving monitors worked. There is no time restriction for landing times and some trips could even occur late into the evening or overnight. Keep in mind that under the current management we have seen striped bass closures in July or August. Fishing trips still occur but at a decreased level. See an example schedule for July 2021 [here](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1633484811/July+2021).  
+-- 9 am - 1 pm   
+-- 1 pm - 3 pm   
+-- 2 pm - 6 pm   
+-- 4 pm - 8 pm (this was usually weighted less than other shifts)  
+-- On board observers do not have time blocks.    
+```{r}
+# plot for hour summary
+ggplot() + 
+  geom_bar(data = trip_sum_byHour, aes(hr, n, fill = type), 
+           stat = "identity" , position = "stack") + 
+  labs(x = "Langing Hour", y = "Number of Trips", fill = "Fishery") + 
+  theme_bw() +
+  theme(text = element_text(size = 20)) 
+# tables
+```
+This plot was made using End Hail landing time. Watermen are notoriously poor reporters for their landing time and at this time we can't calculate how biased these numbers are. To account for this, the plot below is the time a successful spot check occurred. Of course these numbers are also limited since they are within our defined time blocks. Additionally, there appear to be errors (e.g 2 am instead of 2 pm) in these data. 
+
+```{r}
+ggplot() + 
+  geom_bar(data = RM_sum_byHour, aes(hr, n, fill = type), 
+           stat = "identity" , position = "stack") + 
+  labs(x = "Langing Hour", y = "Number of Trips", fill = "Fishery") + 
+  theme_bw() +
+  theme(text = element_text(size = 20)) 
+```
+
+## How to break up the regions  
+Data are summarize by zip code to help inform where to divide the regions for effort. Currently the plan is to have six roving monitors, so 6 regions. There will additionally be two onboard observers. For the onboard observers the regions would be divided by the bay bridge so an analysis for this division is not needed. 
+```{r}
+# plot for zip code summary
+```
+Different gears are additionally permitted differently depending on tributary and may need to be considered in each region.  
+```{r}
+# plot for shellfish gears
+```
+
+
+## Past reports
+Please see this past reports for more guideance. 
+- [2013 Blue Crab Pilot](https://oysterrecovery.sharepoint.com/:b:/g/ES5uAREyU2ROj4RnxtprqhMBz2Usk-_8wm1GTtkAN3-S9A?e=1fwc4g). See appendix [here](https://oysterrecovery.sharepoint.com/:b:/g/ESwVPyAkruNFoL3A3l3IUoQBUyLiOxF3PcD09NW9wBo77w?e=9xiD6i). 
+- [2014 Blue Crab Pilot](https://oysterrecovery.sharepoint.com/:b:/g/EQ4uaGE2_gtNqXsR18myXXUB0aqLJmePPN1aFWZb5BOSyA?e=fhC3j3).
+- Finfish (Links needed for 2015 striped bass and 2016 yellow perch)
+- [2019 Roving Monitor Improvement Pilot](https://oysterrecovery.sharepoint.com/:w:/g/EcGkdQRPimdLj2thgXisEVIB0YMo_fSzsYJWij32MLmabA?e=z4Sy91)
+- [2020 Charter Pilot](https://oysterrecovery.sharepoint.com/:w:/g/EUYIihNppzBFhQwSY7MJM_YBQiEQ5NDaImAdhhNY74n6TA?e=2cCLmq)
+- 2022 Charter final report (link needed once finshed)
+- 2022 Shellfish (link needed once finshed)
+
