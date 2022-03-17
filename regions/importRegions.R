@@ -39,8 +39,8 @@ library(raster)
 
 # path for all others
 #dir.shp = "U:/ORP Operations/Fisheries Program/E-Reporting/4.0 Pilot projects/Pilot Projects/Roving Monitor Pilot/Roving Monitoring folder from Megan/monitoring regions (6) w zip codes/shapefiles of regions/"
-dir.shp = "U:/O365_NEW_ Operations/Sustainable Fisheries/E-Reporting/Pilot Projects/Roving Monitors/Regions/shapefiles of regions"
-
+#dir.shp = "U:/O365_NEW_ Operations/Sustainable Fisheries/E-Reporting/Pilot Projects/Roving Monitors/Regions/shapefiles of regions"
+dir.shp = "~/Oyster Recovery Partnership, Inc/ORP - Operations/Sustainable Fisheries/E-Reporting/Pilot Projects/Roving Monitors/Regions/shapefiles of regions"
 # import data
 r1 = shapefile(paste(dir.shp, "Region 1 - Lower Western Shore", "Region1", sep = "/"))  
 r2 = shapefile(paste(dir.shp, "Region 2 - Middle Western Shore", "Region2", sep = "/"))  
@@ -124,10 +124,10 @@ r5_df = broom::tidy(r5, region = "Tidal_Coun")
 r6_df = broom::tidy(r6, region = "Tidal_Coun") 
 
 r1_df = r1_df %>% mutate(region = 1, county_region = paste(id,region,sep="_")) 
-r2_df = r2_df %>% mutate(region = 2, county_region = paste(id,region,sep="_"),
-                         group = replace(group, group %in% "Anne Arundel.1","Anne Arundel.2"),
-                         group = replace(group, group %in% "Calvert.1","Calvert.2"),
-                         group = replace(group, group %in% "Prince George's.1","Prince George's.2"))
+r2_df = r2_df %>% mutate(region = 2, county_region = paste(id,region,sep="_"))#,
+                         #group = replace(group, group %in% "Anne Arundel.1","Anne Arundel.2"),
+                         #group = replace(group, group %in% "Calvert.1","Calvert.2"),
+                         #group = replace(group, group %in% "Prince George's.1","Prince George's.2"))
 r3_df = r3_df %>% mutate(region = 3, county_region = paste(id,region,sep="_"))
 r4_df = r4_df %>% mutate(region = 4, county_region = paste(id,region,sep="_"))
 r5_df = r5_df %>% mutate(region = 5, county_region = paste(id,region,sep="_"))
