@@ -3,6 +3,7 @@ title: "2023 Roving Monitor Survey Design Guidance"
 author: "Kaycee Coleman"
 date: '2022-03-16'
 output: pdf_document
+urlcolor: blue
 ---
 
 ```{r setup, include=FALSE, echo=FALSE}
@@ -21,6 +22,8 @@ library(readr)
 library(lubridate)
 library(readxl)
 library(hms)
+library(stringr)
+library(raster)
 #-----------#
 
 #-----------#
@@ -40,6 +43,8 @@ SF$type = "shellfish"
 # finfish data from 2019
 FF_BC = read_excel(paste(dir.in, "Aug2019_RM_WM.xlsx", sep=""), sheet = 2)
 FF_BC$type = FF_BC$Fishery
+# trip summary of 2019 - 2020 data all fisheries
+trip_sum = read_csv(paste(dir.in, "FACTSMD-851.csv", sep="")) 
 
 # ROVING MONITOR REPORTS
 # RM charter data from 2021
@@ -82,7 +87,7 @@ FF_BC = dplyr::select(FF_BC, TripID, type, Date, SH, EH, EHLandingTime, EHZip,Ge
   mutate(EHLandingTime = as_hms(sapply(strsplit(as.character(EHLandingTime)," "), tail,1))) 
 
 RM_SF = dplyr::select(RM_SF, TripID, type, Date, MonitorReport,TimeChecked)
-RM_FH = dplyr::select(RM_SF, TripID, type, Date, MonitorReport,TimeChecked)
+RM_FH = dplyr::select(RM_FH, TripID, type, Date, MonitorReport,TimeChecked)
 RM_FF_BC = dplyr::select(RM_FF_BC, TripID, type, Date, MonitorReport, Time) %>%
   mutate(Time = as_hms(sapply(strsplit(as.character(Time)," "), tail,1))) %>% 
   rename(TimeChecked = Time) 
@@ -92,18 +97,22 @@ FH$Date = as.POSIXct(FH$Date,  format = "%d/%m/%Y")
 SF$Date = as.POSIXct(SF$Date,  format = "%d/%m/%Y")
 FF_BC$Date = as.POSIXct(as.character(FF_BC$Date),  format = "%Y-%m-%d") #is UTC, needs to be EST to combine
 RM_FF_BC$Date = as.character(format(RM_FF_BC$Date, format = "%d/%m/%Y")) # reformat
-
+trip_sum$Date = as.POSIXct(trip_sum$Date,  format = "%m/%d/%Y")
+  
 # combine all trip reports (year is not relevant for this effort estimation)
 # & combine all RM reports
+#trips = bind_rows(trip_sum, SF) 
 trips = bind_rows(FH, SF, FF_BC) 
 RM = bind_rows(RM_FH, RM_FF_BC, RM_SF)
 RM$Date = as.POSIXct(RM$Date,  format = "%d/%m/%Y")
 
 # filter to only the last trip in the data (most up to date report)
 trips = group_by(trips, TripID) %>%
-  mutate(lastH = ifelse(EH %in% max(EH), "yes","no")) %>%
-  filter(lastH %in% "yes") %>% ungroup() %>% 
-  dplyr::select(-EH, -lastH) 
+ mutate(lastSH = ifelse(SH == max(SH),"yes","no"),
+         lastEH = ifelse(EH == max(EH),"yes","no")) %>%
+  filter(lastSH %in% "yes" & lastEH %in% "yes") %>%
+  dplyr::select(-lastSH, -lastEH) 
+
 
 RM = group_by(RM, TripID) %>%
   mutate(lastR = ifelse(MonitorReport == max(MonitorReport),"yes","no")) %>%
@@ -116,12 +125,16 @@ trips = trips %>%
   mutate(mo = month(Date),
          yr = year(Date),
          d = wday(Date, label = TRUE, abbr = TRUE),
-         hr = hour(EHLandingTime))
+         hr = hour(EHLandingTime),
+         type = str_to_title(type))
 RM = RM %>% 
   mutate(mo = month(Date),
          yr = year(Date),
          d = wday(Date, label = TRUE, abbr = TRUE),
-         hr = hour(TimeChecked))
+         hr = hour(TimeChecked),
+         hr = ifelse(type %in% "charter" & hr < 9, hr + 12, hr),# incorrect time (LOTS of these)
+         type = str_to_title(type)) %>%
+  filter(!is.na(type)) # remove rows lacking data
 
 # summarize trips by month
 trips = filter(trips, !TripID %in% 1191070) #remove test trip
@@ -162,100 +175,130 @@ RM_sum_byHour = RM %>%
   dplyr::summarise(n=n(), .groups = 'drop')
 
 # summarize by zipcode
+trip_sum_byZip = trips %>% 
+  distinct() %>% 
+  group_by(type, EHZip) %>% 
+  dplyr::summarise(n=n(), .groups = 'drop')
 
+# load zips
+## https://data.imap.maryland.gov/datasets/maryland::maryland-census-data-zip-code-tabulation-areas-zctas/about
+source("Library/CloudStorage/OneDrive-SharedLibraries-OysterRecoveryPartnership,Inc/ORP - Operations/Sustainable Fisheries/E-Reporting/Pilot Projects/Roving Monitors/code/importRegions.R")
+zips = shapefile("Library/CloudStorage/OneDrive-SharedLibraries-OysterRecoveryPartnership,Inc/ORP - Operations/GIS/Background Data/County Shapefiles/Maryland_Political_Boundaries__ZIP_Codes__5_Digit.shp")  
+zips_df = broom::tidy(zips, region = "ZIPCODE1") 
+zips_df = filter(zips_df, id %in% zip_region_list$Zip) %>% 
+  mutate(id = as.numeric(id))
+zips_df = left_join(zips_df, trip_sum_byZip, by = c("id"="EHZip"))
 #-----------#
 ```
+
 ## Which months should a Roving Monitor be monitoring each fishery
 If granted the NOAA FIS RFP, funding would start in spring 2023 and would encompass 12 months. Here is an outline of when the fishery opens/closes. A visual of this can be seen in confluence [here](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1819213825/Fisheries+Dates).    
-- Shellfish:  
--- Oysters are open 10/1 - 3/31 except weekends. Different gears have different opening dates, e.g. dredge opens 11/1.  
--- Soft Shell Clams are open year round except Sunday
--- Razor Clams  
--- Hard Shell Clams are open 9/15-5/31 except Sunday but are unlikely. Fishery is functionally extinct in bay.  
-- Charter: see full species opening dates in list in link above  
--- Striped Bass
-- Finfish: see full species open dates in list in link above
--- Yellow Perch
--- Striped Bass
-- Blue Crab  
--- Dates differ for hard, soft, and peelers but generally encompassed in 4/1 - 12/15
 
-```{r}
+*  Shellfish:
+     +  Oysters are open 10/1 - 3/31 except weekends. Different gears have different opening dates, e.g. dredge opens 11/1.
+     +  Soft Shell Clams are open year round except Sunday
+     +  Razor Clams are open year round except Sunday
+     +  Hard Shell Clams are open 9/15 - 5/31 except Sunday but are unlikely. Fishery is functionally extinct in bay.
+*  Charter: see full species opening dates in list in the [confluence link](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1819213825/Fisheries+Dates)
+     +  Striped Bass are open for trophy season in early May, then open 6/1 - 12/31
+*  Finfish: see full species open dates in list in the [confluence link](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1819213825/Fisheries+Dates)
+     +  Yellow Perch are open 12/1 - 3/31
+     +  Striped Bass openings are gear dependent, see the [confluence link](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1819213825/Fisheries+Dates)
+*  Blue Crab
+     +  Dates differ for hard, soft, and peelers but generally encompasses 4/1 - 12/15
+
+```{r, echo=FALSE}
 # plot for month summary
 ggplot() + 
   geom_bar(data = trip_sum_byMonth, aes(reorder(month, mo), n, fill = type), 
            stat = "identity" , position = "stack") + 
-  labs(x = "Month", y = "Number of Trips", fill = "Fishery") + 
+  labs(x = "Month", y = "Number of Trips", fill = "Fishery", title = "Trip Frequency by Month") + 
   theme_bw() +
-  theme(text = element_text(size = 20)) 
+  theme(text = element_text(size = 15),
+        legend.position = "bottom") 
 ```
 
-```{r}
+```{r, echo = FALSE}
 # plot for day summary
 ggplot() + 
   geom_bar(data = trip_sum_byDay, aes(x=d, y=n, fill = type), 
            stat = "identity" , position = "stack") + 
-  labs(x = "Day of the Week", y = "Number of Trips", fill = "Fishery") + 
+  labs(x = "Day of the Week", y = "Number of Trips", fill = "Fishery", title = "Trip Frequency by Day") + 
   theme_bw() +
-  theme(text = element_text(size = 20)) 
+  theme(text = element_text(size = 15),
+        legend.position = "bottom") 
 ```
 
 ## How to decide on time blocks  
-Here is the time block divisions that we have used so far:  
-- For finfish and bluecrab we had  
--- 
-- For shellfish, roving monitors work eight days a month in six hour time blocks. Keep in mind that under the current managment, there is no fishing on weekends. Here is the landing time guidance in the permit: Oysters by 2:30 p.m. when using shaft tong, patent tong, dredge boat, diving apparatus, or power
+Here is the time block divisions that we have used so far:    
+
+*  For finfish and bluecrab we had six hour time blocks. 
+      + 7 am - 1 pm 
+      + 11 am - 5 pm 
+      + 3 pm - 9 pm 
+*  For shellfish, roving monitors work eight days a month in six hour time blocks. Keep in mind that under the current managment, there is no fishing on weekends. Here is the landing time guidance in the permit: Oysters by 2:30 p.m. when using shaft tong, patent tong, dredge boat, diving apparatus, or power
 dredge; Oysters at least 1/2 hour before sunset when using a dredge boat propelled by means of an auxiliary
-yawl boat; and Clams at least 1/2 hour before sunset.  See an example schedule used for March 2022  [here](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1832714241/March+2022).  
--- 8 am - 2 pm  
--- 9 am - 3 pm   
--- 12 pm - 6 pm  
--- Carrie has requested that some time in the future we also have roving monitors at dealers, this may or may not be included in this effort but keep it in mind.   
-- For charter, roving monitors worked. There is no time restriction for landing times and some trips could even occur late into the evening or overnight. Keep in mind that under the current management we have seen striped bass closures in July or August. Fishing trips still occur but at a decreased level. See an example schedule for July 2021 [here](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1633484811/July+2021).  
--- 9 am - 1 pm   
--- 1 pm - 3 pm   
--- 2 pm - 6 pm   
--- 4 pm - 8 pm (this was usually weighted less than other shifts)  
--- On board observers do not have time blocks.    
-```{r}
+yawl boat; and Clams at least 1/2 hour before sunset.  See an example schedule used for March 2022  [here](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1832714241/March+2022). 
+    +  8 am - 2 pm
+    +  9 am - 3 pm
+    +  12 pm - 6 pm
+    +  Carrie has requested that some time in the future we also have roving monitors at dealers, this may or may not be included in this effort but keep it in mind.
+*  For charter, roving monitors worked. There is no time restriction for landing times and some trips could even occur late into the evening or overnight. Keep in mind that under the current management we have seen striped bass closures in July or August. Fishing trips still occur but at a decreased level. See an example schedule for July 2021 [here](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1633484811/July+2021).
+     +  9 am - 1 pm
+     +  1 pm - 3 pm
+     +  2 pm - 6 pm
+     +  4 pm - 8 pm (this was usually weighted less than other shifts)
+*  On board observers do not have time blocks.   
+
+```{r, echo=FALSE}
 # plot for hour summary
 ggplot() + 
   geom_bar(data = trip_sum_byHour, aes(hr, n, fill = type), 
            stat = "identity" , position = "stack") + 
-  labs(x = "Langing Hour", y = "Number of Trips", fill = "Fishery") + 
+  labs(x = "Landing Hour", y = "Number of Trips", fill = "Fishery", title = "Frequency of Trip Landings") + 
   theme_bw() +
-  theme(text = element_text(size = 20)) 
+  theme(text = element_text(size = 15),
+        legend.position = "bottom") 
 # tables
 ```
 This plot was made using End Hail landing time. Watermen are notoriously poor reporters for their landing time and at this time we can't calculate how biased these numbers are. To account for this, the plot below is the time a successful spot check occurred. Of course these numbers are also limited since they are within our defined time blocks. Additionally, there appear to be errors (e.g 2 am instead of 2 pm) in these data. 
 
-```{r}
+```{r, echo=FALSE}
 ggplot() + 
   geom_bar(data = RM_sum_byHour, aes(hr, n, fill = type), 
            stat = "identity" , position = "stack") + 
-  labs(x = "Langing Hour", y = "Number of Trips", fill = "Fishery") + 
+  labs(x = "Landing Hour", y = "Number of Trips", fill = "Fishery", title = "Frequency of Spot Checks for Each Hour") + 
   theme_bw() +
-  theme(text = element_text(size = 20)) 
+  theme(text = element_text(size = 15),
+        legend.position = "bottom") 
 ```
 
 ## How to break up the regions  
-Data are summarize by zip code to help inform where to divide the regions for effort. Currently the plan is to have six roving monitors, so 6 regions. There will additionally be two onboard observers. For the onboard observers the regions would be divided by the bay bridge so an analysis for this division is not needed. 
+Data are summarize by zip code to help inform where to divide the regions for effort. Currently the plan is to have six roving monitors, with six regions. There will additionally be two onboard observers. For the onboard observers the regions would be divided by the bay bridge so an analysis for this division is not needed. It should be noted that there will be out of state zip codes that occur in the data form Virginia and Delaware. Roving monitors will not meet those that land out of state; however, if they are incorrectly listing their home address instead of their landing site it should be corrected if possible. Zip code errors do occurr in the earlier data before the address verification was added in FACTS. 
 ```{r}
 # plot for zip code summary
+ggplot() + 
+  geom_polygon(data = zips_df, aes(y = lat, x = long,  fill = n, group = group)) + 
+  labs(x = "Landing Hour", y = "Number of Trips", fill = "Fishery", title = "Number of Trips in Each Zip Code") + 
+  theme_bw() +
+  theme(text = element_text(size = 15),
+        legend.position = "bottom") 
 ```
 Different gears are additionally permitted differently depending on tributary and may need to be considered in each region.  
+
 ```{r}
 # plot for shellfish gears
 ```
 
 
 ## Past reports
-Please see this past reports for more guideance. 
-- [2013 Blue Crab Pilot](https://oysterrecovery.sharepoint.com/:b:/g/ES5uAREyU2ROj4RnxtprqhMBz2Usk-_8wm1GTtkAN3-S9A?e=1fwc4g). See appendix [here](https://oysterrecovery.sharepoint.com/:b:/g/ESwVPyAkruNFoL3A3l3IUoQBUyLiOxF3PcD09NW9wBo77w?e=9xiD6i). 
-- [2014 Blue Crab Pilot](https://oysterrecovery.sharepoint.com/:b:/g/EQ4uaGE2_gtNqXsR18myXXUB0aqLJmePPN1aFWZb5BOSyA?e=fhC3j3).
-- Finfish (Links needed for 2015 striped bass and 2016 yellow perch)
-- [2019 Roving Monitor Improvement Pilot](https://oysterrecovery.sharepoint.com/:w:/g/EcGkdQRPimdLj2thgXisEVIB0YMo_fSzsYJWij32MLmabA?e=z4Sy91)
-- [2020 Charter Pilot](https://oysterrecovery.sharepoint.com/:w:/g/EUYIihNppzBFhQwSY7MJM_YBQiEQ5NDaImAdhhNY74n6TA?e=2cCLmq)
-- 2022 Charter final report (link needed once finshed)
-- 2022 Shellfish (link needed once finshed)
+Please see these past reports for more guideance.   
+
+*  [2013 Blue Crab Pilot](https://oysterrecovery.sharepoint.com/:b:/g/ES5uAREyU2ROj4RnxtprqhMBz2Usk-_8wm1GTtkAN3-S9A?e=1fwc4g). See appendix [here](https://oysterrecovery.sharepoint.com/:b:/g/ESwVPyAkruNFoL3A3l3IUoQBUyLiOxF3PcD09NW9wBo77w?e=9xiD6i). 
+*  [2014 Blue Crab Pilot](https://oysterrecovery.sharepoint.com/:b:/g/EQ4uaGE2_gtNqXsR18myXXUB0aqLJmePPN1aFWZb5BOSyA?e=fhC3j3).
+*  Finfish (Links needed for 2015 striped bass and 2016 yellow perch)
+*  [2019 Roving Monitor Improvement Pilot](https://oysterrecovery.sharepoint.com/:w:/g/EcGkdQRPimdLj2thgXisEVIB0YMo_fSzsYJWij32MLmabA?e=z4Sy91)
+*  [2020 Charter Pilot](https://oysterrecovery.sharepoint.com/:w:/g/EUYIihNppzBFhQwSY7MJM_YBQiEQ5NDaImAdhhNY74n6TA?e=2cCLmq)
+*  2022 Charter final report (link needed once finshed)
+*  2022 Shellfish (link needed once finshed)
 
