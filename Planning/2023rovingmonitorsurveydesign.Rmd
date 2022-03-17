@@ -275,11 +275,12 @@ ggplot() +
 
 ## How to break up the regions  
 Data are summarize by zip code to help inform where to divide the regions for effort. Currently the plan is to have six roving monitors, with six regions. There will additionally be two onboard observers. For the onboard observers the regions would be divided by the bay bridge so an analysis for this division is not needed. It should be noted that there will be out of state zip codes that occur in the data form Virginia and Delaware. Roving monitors will not meet those that land out of state; however, if they are incorrectly listing their home address instead of their landing site it should be corrected if possible. Zip code errors do occurr in the earlier data before the address verification was added in FACTS. 
+
 ```{r}
 # plot for zip code summary
 ggplot() + 
-  geom_polygon(data = zips_df, aes(y = lat, x = long,  fill = n, group = group)) + 
-  labs(x = "Landing Hour", y = "Number of Trips", fill = "Fishery", title = "Number of Trips in Each Zip Code") + 
+  geom_polygon(data = zips_df, aes(y = lat, x = long,  fill = log(n), group = group)) + 
+  labs(x = "Longitude", y = "Latitude", fill = "Log Transformed Number of Trips", title = "Number of Trips in Each Zip Code") + 
   theme_bw() +
   theme(text = element_text(size = 15),
         legend.position = "bottom") 
