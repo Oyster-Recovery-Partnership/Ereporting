@@ -300,24 +300,24 @@ ggplot() +
   theme_bw() +
   theme(text = element_text(size = 20),
         legend.position = "bottom") +
-  scale_fill_viridis(option = "C")
+  scale_fill_viridis(option = "turbo")
 ```
      
 Keep in mind, these regions may need to shift seasonally to accommidate trips. Consider the monthly graph above, and this zip code plot may need to be recreated by season.   
   
 Different gears are additionally permitted differently depending on tributary and may need to be considered in each region.  
 
-```{r, echo = FALSE, fig.width=8, fig.height=12}
+```{r, echo = FALSE, fig.width=8, fig.height=10}
 ggplot() + 
   geom_polygon(data = zips_df, aes(y = lat, x = long,  group = group), fill="grey") + 
   geom_polygon(data = zips_df2, aes(y = lat, x = long,  fill = n, group = group)) + 
   labs(x = "Longitude", y = "Latitude", fill = "Number of Shellfish Trips by Gear", 
        title = "Number of Shellfish Trips by Gear and Zip Code") + 
   facet_wrap(~Gear) +
-  theme_bw() +
-  theme(text = element_text(size = 20),
+  theme_bw() + 
+  theme(text = element_text(size = 13),
         legend.position = "bottom") +
-  scale_fill_viridis(option = "C")
+  scale_fill_viridis(option = "turbo")
 ```
 
 
