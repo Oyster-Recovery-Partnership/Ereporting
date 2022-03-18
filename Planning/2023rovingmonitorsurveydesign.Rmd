@@ -87,9 +87,9 @@ FH = dplyr::select(FH, TripID, type, Date, SH, EH, EHLandingTime, EHZip,Gear)
 FF_BC = dplyr::select(FF_BC, TripID, type, Date, SH, EH, EHLandingTime, EHZip,Gear) %>% 
   mutate(EHLandingTime = as_hms(sapply(strsplit(as.character(EHLandingTime)," "), tail,1))) 
 
-RM_SF = dplyr::select(RM_SF, TripID, type, Date, MonitorReport,TimeChecked)
-RM_FH = dplyr::select(RM_FH, TripID, type, Date, MonitorReport,TimeChecked)
-RM_FF_BC = dplyr::select(RM_FF_BC, TripID, type, Date, MonitorReport, Time) %>%
+RM_SF = dplyr::select(RM_SF, TripID, type, Date, MonitorReport, TimeChecked, Result)
+RM_FH = dplyr::select(RM_FH, TripID, type, Date, MonitorReport, TimeChecked, Result)
+RM_FF_BC = dplyr::select(RM_FF_BC, TripID, type, Date, MonitorReport, Time, Result) %>%
   mutate(Time = as_hms(sapply(strsplit(as.character(Time)," "), tail,1))) %>% 
   rename(TimeChecked = Time) 
 
@@ -171,6 +171,8 @@ trip_sum_byHour = trips %>%
 
 # summarize RM spot check time
 RM_sum_byHour = RM %>% 
+  mutate(Result = toupper(Result)) %>%
+  filter(Result %in% c("MONITORED", "MONITORED (ON PAPER)")) %>%
   distinct() %>% 
   group_by(type, hr) %>% 
   dplyr::summarise(n=n(), .groups = 'drop')
@@ -189,6 +191,19 @@ zips_df = broom::tidy(zips, region = "ZIPCODE1")
 zips_df = filter(zips_df, id %in% zip_region_list$Zip) %>% 
   mutate(id = as.numeric(id))
 zips_df = left_join(zips_df, trip_sum_byZip, by = c("id"="EHZip"))
+
+# gears
+trip_sum_SF_Gear = trips %>% 
+  filter(type %in% "Shellfish") %>% 
+  group_by(EHZip, Gear) %>% 
+  dplyr::summarise(n=n(), .groups = 'drop') %>% 
+  filter(!is.na(Gear))
+
+zips_df2 = broom::tidy(zips, region = "ZIPCODE1") 
+zips_df2 = filter(zips_df2, id %in% zip_region_list$Zip) %>% 
+  mutate(id = as.numeric(id))
+zips_df2 = left_join(zips_df2, trip_sum_SF_Gear, by = c("id"="EHZip"))
+
 #-----------#
 ```
 
@@ -198,10 +213,10 @@ If granted the NOAA FIS RFP, funding would start in spring 2023 and would encomp
 *  Shellfish:
      +  Oysters are open 10/1 - 3/31 except weekends. Different gears have different opening dates, e.g. dredge opens 11/1.
      +  Soft Shell Clams are open year round except Sunday
-     +  Razor Clams are open year round except Sunday
+     +  Razor Clams are open year round except Sunday. The bulk of harvest correlates with blue crab. 
      +  Hard Shell Clams are open 9/15 - 5/31 except Sunday but are unlikely. Fishery is functionally extinct in bay.
 *  Charter: see full species opening dates in list in the [confluence link](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1819213825/Fisheries+Dates)
-     +  Striped Bass are open for trophy season in early May, then open 6/1 - 12/31
+     +  Striped Bass are open for trophy season in early May, then open 6/1 - 12/31. It is likely there will be a clouse in July or August. 
 *  Finfish: see full species open dates in list in the [confluence link](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1819213825/Fisheries+Dates)
      +  Yellow Perch are open 12/1 - 3/31
      +  Striped Bass openings are gear dependent, see the [confluence link](https://oysterrecoverypartnership.atlassian.net/wiki/spaces/EREPORTING/pages/1819213825/Fisheries+Dates)
@@ -287,11 +302,22 @@ ggplot() +
         legend.position = "bottom") +
   scale_fill_viridis(option = "C")
 ```
-    
+     
+Keep in mind, these regions may need to shift seasonally to accommidate trips. Consider the monthly graph above, and this zip code plot may need to be recreated by season.   
+  
 Different gears are additionally permitted differently depending on tributary and may need to be considered in each region.  
 
-```{r}
-# plot for shellfish gears
+```{r, echo = FALSE, fig.width=8, fig.height=12}
+ggplot() + 
+  geom_polygon(data = zips_df, aes(y = lat, x = long,  group = group), fill="grey") + 
+  geom_polygon(data = zips_df2, aes(y = lat, x = long,  fill = n, group = group)) + 
+  labs(x = "Longitude", y = "Latitude", fill = "Number of Shellfish Trips by Gear", 
+       title = "Number of Shellfish Trips by Gear and Zip Code") + 
+  facet_wrap(~Gear) +
+  theme_bw() +
+  theme(text = element_text(size = 20),
+        legend.position = "bottom") +
+  scale_fill_viridis(option = "C")
 ```
 
 
